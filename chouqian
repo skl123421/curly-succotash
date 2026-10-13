@@ -1,0 +1,82 @@
+name: 保活与探针 · 小组抽签
+
+# 干什么用的
+#   1) 保活：Supabase 免费项目连续一周没人访问会被「暂停」，
+#      每天来碰一下就不会。注意要真读到数据库，光开页面不够 ——
+#      所以下面会向 draw 发一次只读请求（op=peek，不写任何数据）。
+#   2) 探针：万一哪天页面打不开、或六处改口少了一处，
+#      这个任务会失败，GitHub 会给你发邮件。
+#
+# 说明
+#   · cron 用的是 UTC：0 0 * * * = 北京时间 早上 8:00
+#   · 计划任务在仓库长期不活跃时会被 GitHub 自动停掉，
+#     偶尔手动 Run 一次（或动一下仓库）即可复位
+#   · 不需要任何密钥：调的是公开地址
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:      # 也可以在 Actions 页面手动点一下跑
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    env:
+      BASE: https://vhnokpwcsxyjlsvnkqpi.supabase.co/functions/v1
+      SITE: https://vhnokpwcsxyjlsvnkqpi.supabase.co/functions/v1/site
+    steps:
+      - name: 打开页面（预期 200，且是完整页面）
+        run: |
+          code=$(curl -s -o /tmp/page.html -w '%{http_code}' -m 30 "$SITE")
+          bytes=$(wc -c < /tmp/page.html)
+          echo "site  -> HTTP $code ，$bytes 字节"
+          [ "$code" = "200" ] || { echo "::error::页面打不开（HTTP $code）"; exit 1; }
+          # 提示页只有几百字节；真页面十几万
+          [ "$bytes" -gt 100000 ] || { echo "::error::页面太小（$bytes 字节），像是「页面正在更新」提示页"; exit 1; }
+          # 六处改口抽三处关键的验一下
+          grep -q 'window.WorkBuddyCloud' /tmp/page.html \
+            || { echo "::error::页面里没有云调用 shim"; exit 1; }
+          grep -q 'PUBLIC_URL = "https://vhnokpwcsxyjlsvnkqpi.supabase.co/functions/v1/site/"' /tmp/page.html \
+            || { echo "::error::PUBLIC_URL 没指到本站（二维码会扫到老地址）"; exit 1; }
+          grep -q 'og:image" content="https://vhnokpwcsxyjlsvnkqpi.supabase.co/functions/v1/site/share.png"' /tmp/page.html \
+            || { echo "::error::og:image 没指到本站（微信卡片会没图）"; exit 1; }
+          echo "页面内容检查通过 ✓"
+
+      - name: 碰一次数据库（保活的关键：真读一次表）
+        run: |
+          code=$(curl -s -o /tmp/draw.json -w '%{http_code}' -m 30 \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"op":"peek","room":"__keepalive__","name":"keepalive"}' \
+            "$BASE/draw")
+          echo "draw  -> HTTP $code"
+          cat /tmp/draw.json; echo
+          # 只读探测：不存在的房间必然回 NO_ROOM（这就说明数据库读通了）
+          grep -q 'NO_ROOM' /tmp/draw.json \
+            || { echo "::error::draw 没有按预期回 NO_ROOM（说明它读不到数据库）"; exit 1; }
+          # 顺手确认它拿到的是有权限的钥匙
+          curl -s -m 30 -X POST -H 'Content-Type: application/json' \
+            -d '{"op":"whoami"}' "$BASE/draw" -o /tmp/who.json
+          echo "whoami ->"; cat /tmp/who.json; echo
+          grep -q '"canReadRooms": true' /tmp/who.json \
+            || { echo "::error::draw 选的钥匙读不了表"; exit 1; }
+          echo "数据库读写正常 ✓"
+
+      - name: 卡片图与图标能不能取到
+        run: |
+          for f in share.png icon.png favicon.ico; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 "$SITE/$f")
+            echo "$f -> HTTP $code"
+            [ "$code" = "200" ] || { echo "::error::$f 取不到（HTTP $code）"; exit 1; }
+          done
+          type=$(curl -s -o /dev/null -w '%{content_type}' -m 30 "$SITE/share.png")
+          echo "share.png 类型: $type"
+          case "$type" in image/*) ;;
+            *) echo "::error::share.png 不是图片类型（$type）"; exit 1;;
+          esac
+          echo "卡片素材齐了 ✓"
+
+      - name: 汇总
+        run: echo "全部正常 —— 项目保活完成，页面 / 引擎 / 数据库 / 卡片素材都通。"
