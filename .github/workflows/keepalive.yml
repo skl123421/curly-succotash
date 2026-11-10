@@ -8,18 +8,19 @@ name: 保活与探针 · 小组抽签
 #      这个任务会失败，GitHub 会给你发邮件。
 #
 # 说明
-#   · cron 用的是 UTC：0 0 * * * = 北京时间 早上 8:00
-#   · 计划任务在仓库长期不活跃时会被 GitHub 自动停掉，
-#     偶尔手动 Run 一次（或动一下仓库）即可复位
+#   · cron 用的是 UTC：17 3 * * * = 北京时间 11:17
+#     故意避开整点 —— GitHub 在整点排队最严重，实测 0 0 * * * 会晚 4 小时
+#   · 最后一步会每月做一次心跳提交：公开仓库 60 天没有 commit 会自动停掉
+#     schedule，手动 Run 不算数，只有 commit 才能重置计时器
 #   · 不需要任何密钥：调的是公开地址
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '17 3 * * *'
   workflow_dispatch:      # 也可以在 Actions 页面手动点一下跑
 
 permissions:
-  contents: read
+  contents: write         # 心跳提交需要写权限（原来只读）
 
 jobs:
   ping:
@@ -92,3 +93,18 @@ jobs:
 
       - name: 汇总
         run: echo "全部正常 —— 项目保活完成，页面 / 引擎 / 数据库 / 卡片素材都通。"
+
+      # ★ 新增：心跳提交，防止「公开仓库 60 天无 commit → schedule 被自动禁用」
+      #   按月份写文件，所以每月只产生 1 个 commit（一年 12 个），不刷屏。
+      - name: 心跳提交（防 60 天自动禁用 schedule）
+        run: |
+          git config user.name  "keepalive-bot"
+          git config user.email "keepalive-bot@users.noreply.github.com"
+          echo "last keepalive: $(date -u +%Y-%m)" > .keepalive
+          git add .keepalive
+          if git diff --staged --quiet; then
+            echo "本月已经提交过，跳过"
+          else
+            git commit -m "chore: keepalive $(date -u +%F)"
+            git push
+          fi
