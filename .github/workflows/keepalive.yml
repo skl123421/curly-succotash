@@ -1,3 +1,12 @@
+# ============================================================
+#  上传前必看：
+#  1. 本文件名改成你仓库里现有的那个 workflow 文件名（.github/workflows/ 下）
+#     比如你原来是 keepalive.yml，就把这个文件也命名成 keepalive.yml，
+#     上传时 GitHub 会提示覆盖（replace）。
+#  2. 上传路径必须是 .github/workflows/<文件名>.yml
+#  3. 比线上版只改了 4 处，全部用 ★ 标出来了
+# ============================================================
+
 name: 保活与探针 · 小组抽签
 
 # 干什么用的
@@ -8,19 +17,19 @@ name: 保活与探针 · 小组抽签
 #      这个任务会失败，GitHub 会给你发邮件。
 #
 # 说明
-#   · cron 用的是 UTC：17 3 * * * = 北京时间 11:17
+#   · cron 用的是 UTC。★ 改成 17 3 * * * = 北京时间 11:17
 #     故意避开整点 —— GitHub 在整点排队最严重，实测 0 0 * * * 会晚 4 小时
-#   · 最后一步会每月做一次心跳提交：公开仓库 60 天没有 commit 会自动停掉
-#     schedule，手动 Run 不算数，只有 commit 才能重置计时器
+#   · ★ 最后一步会每月做一次心跳提交：公开仓库 60 天没有 commit 会
+#     自动停掉 schedule，手动 Run 不算数，只有 commit 才能重置计时器
 #   · 不需要任何密钥：调的是公开地址
 
 on:
   schedule:
-    - cron: '17 3 * * *'
-  workflow_dispatch:      # 也可以在 Actions 页面手动点一下跑
+    - cron: '17 3 * * *'          # ★ 原来 0 0 * * *
+  workflow_dispatch:               # 也可以在 Actions 页面手动点一下跑
 
 permissions:
-  contents: write         # 心跳提交需要写权限（原来只读）
+  contents: write                  # ★ 原来 read；心跳提交需要写权限
 
 jobs:
   ping:
@@ -29,6 +38,9 @@ jobs:
       BASE: https://vhnokpwcsxyjlsvnkqpi.supabase.co/functions/v1
       SITE: https://vhnokpwcsxyjlsvnkqpi.supabase.co/functions/v1/site
     steps:
+      # ★ 新增：后面心跳提交要用 git，必须先 checkout 仓库
+      - uses: actions/checkout@v4
+
       - name: 打开页面（预期 200，且是完整页面）
         run: |
           code=$(curl -s -o /tmp/page.html -w '%{http_code}' -m 30 "$SITE")
